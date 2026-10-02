@@ -1,8 +1,13 @@
+import errno
+import hashlib
+import os
 from pathlib import Path
+import select
 import shlex
 import subprocess
 import sys
 import time
+from threading import Event, Thread
 from unittest.mock import patch
 
 from agent_bridge import BridgeError
@@ -214,6 +219,131 @@ class GitRecoveryTests(GitTestCase):
         with patch("agent_bridge.transport.git_backend.subprocess.Popen", side_effect=observe):
             with self.assertRaises(GitError):
                 backend.run(["rev-parse", "--verify", "refs/heads/absent"])
+        self.assertIsNotNone(processes[0].poll())
+        self.assertTrue(processes[0].stdout.closed)
+        self.assertTrue(processes[0].stderr.closed)
+
+    def test_interruption_with_blocked_stdin_kills_child_and_joins_workers(self):
+        backend = GitBackend(self.remote)
+        args, helper = self.stall_args()
+        ready = Event()
+        interruption = KeyboardInterrupt("Fixture caller interruption")
+        processes, threads, watches = [], [], []
+        original = subprocess.Popen
+
+        def observe(*arguments, **kwargs):
+            process = original(*arguments, **kwargs)
+            processes.append(process)
+            read = process.stdout.read
+            def read_ready(size):
+                chunk = read(size)
+                if chunk:
+                    ready.set()
+                return chunk
+            process.stdout.read = read_ready
+            wait = process.wait
+            first = True
+            def interrupt_once(*values, **options):
+                nonlocal first
+                if first:
+                    first = False
+                    self.assertTrue(ready.wait(timeout=5), "Real child did not signal readiness")
+                    pid = int(helper.with_suffix(".pid").read_text())
+                    if os.name == "nt":
+                        import ctypes
+                        from ctypes import wintypes
+                        api = ctypes.WinDLL("kernel32", use_last_error=True)
+                        api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+                        api.OpenProcess.restype = wintypes.HANDLE
+                        api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                        api.WaitForSingleObject.restype = wintypes.DWORD
+                        api.CloseHandle.argtypes = [wintypes.HANDLE]
+                        api.CloseHandle.restype = wintypes.BOOL
+                        handle = api.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+                        self.assertTrue(handle)
+                        watches.append(("windows", api, handle))
+                    elif hasattr(os, "pidfd_open"):
+                        watches.append(("pidfd", None, os.pidfd_open(pid)))
+                    else:
+                        watches.append(("pid", None, pid))
+                    raise interruption
+                return wait(*values, **options)
+            process.wait = interrupt_once
+            return process
+
+        def record_thread(*args, **kwargs):
+            thread = Thread(*args, **kwargs)
+            threads.append(thread)
+            return thread
+
+        started = time.monotonic()
+        try:
+            with patch("agent_bridge.transport.git_backend.subprocess.Popen", side_effect=observe), \
+                    patch("agent_bridge.transport.git_backend.Thread", side_effect=record_thread):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    # The helper never reads stdin: this also exercises a blocked writer.
+                    backend.run(args, data=b"x" * 1_048_576)
+            self.assertIs(caught.exception, interruption)
+            self.assertLess(time.monotonic() - started, 12)
+            self.assertIsNotNone(processes[0].poll())
+            self.assertTrue(all(stream.closed for stream in
+                                (processes[0].stdin, processes[0].stdout, processes[0].stderr)))
+            self.assertEqual(len(threads), 3)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            kind, api, handle = watches[0]
+            if kind == "windows":
+                self.assertEqual(api.WaitForSingleObject(handle, 0), 0)  # Child exited.
+            elif kind == "pidfd":
+                self.assertEqual(select.select([handle], [], [], 0)[0], [handle])
+            else:
+                status = subprocess.run(["ps", "-o", "stat=", "-p", str(handle)],
+                                        capture_output=True, text=True, timeout=2).stdout.strip()
+                self.assertTrue(not status or status.startswith("Z"), status)
+        finally:
+            for kind, api, handle in watches:
+                if kind == "windows":
+                    api.CloseHandle(handle)
+                elif kind == "pidfd":
+                    os.close(handle)
+
+    def test_success_and_git_failure_close_stdin_and_join_workers(self):
+        backend = GitBackend(self.remote)
+        processes, threads = [], []
+        original = subprocess.Popen
+        def observe(*args, **kwargs):
+            process = original(*args, **kwargs)
+            processes.append(process)
+            return process
+        def record_thread(*args, **kwargs):
+            thread = Thread(*args, **kwargs)
+            threads.append(thread)
+            return thread
+        payload = b"Complete fixture input\n" * 32768
+        digest = hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest().encode() + b"\n"
+        with patch("agent_bridge.transport.git_backend.subprocess.Popen", side_effect=observe), \
+                patch("agent_bridge.transport.git_backend.Thread", side_effect=record_thread):
+            self.assertEqual(backend.run(["hash-object", "--stdin"], data=payload), digest)
+            with self.assertRaises(GitError):
+                backend.run(["rev-parse", "--verify", "refs/heads/absent"], data=payload)
+        self.assertTrue(all(process.poll() is not None for process in processes))
+        self.assertTrue(all(stream.closed for process in processes for stream in
+                            (process.stdin, process.stdout, process.stderr)))
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+
+    def test_unrelated_reader_error_is_reported_after_cleanup(self):
+        backend = GitBackend(self.remote)
+        processes = []
+        original = subprocess.Popen
+        def fail_read(*args, **kwargs):
+            process = original(*args, **kwargs)
+            processes.append(process)
+            def broken_read(size):
+                raise OSError(errno.EIO, "Injected pipe read failure")
+            process.stdout.read = broken_read
+            return process
+        with patch("agent_bridge.transport.git_backend.subprocess.Popen", side_effect=fail_read):
+            with self.assertRaisesRegex(BridgeError, "process/pipe cleanup.*failed"):
+                backend.run(["rev-parse", "--is-bare-repository"])
         self.assertIsNotNone(processes[0].poll())
         self.assertTrue(processes[0].stdout.closed)
         self.assertTrue(processes[0].stderr.closed)
