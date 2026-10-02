@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.env
+.env.*
+!.env.example
+*.pyc
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+.pytest_cache/
+.agentbridge/
+.validation/

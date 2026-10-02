@@ -1,0 +1,528 @@
+{
+  "$id": "urn:agent-bridge:protocol:0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "state"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "in_reply_to": {
+            "type": "null"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "blockers": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "next_action": {
+                "type": "string"
+              },
+              "risks": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "state": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "state",
+              "blockers",
+              "risks",
+              "next_action"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "blocked"
+            ]
+          },
+          "task_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "type": "null"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "rationale": {
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "requires_approval": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "rationale",
+              "requires_approval"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "awaiting_approval"
+            ]
+          },
+          "task_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "approval"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "rationale": {
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "rationale"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "task_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "task"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "type": "null"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "approval_ids": {
+                "items": {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "description": {
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "title": {
+                "pattern": "\\S",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "description",
+              "approval_ids"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "pending"
+            ]
+          },
+          "task_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "handoff"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "blockers": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "context": {
+                "type": "object"
+              },
+              "instructions": {
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "next_action": {
+                "type": "string"
+              },
+              "risks": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "instructions",
+              "context",
+              "blockers",
+              "risks",
+              "next_action"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "handed_off"
+            ]
+          },
+          "task_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "report"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "artifacts": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "blockers": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "next_action": {
+                "type": "string"
+              },
+              "result": {
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "risks": {
+                "items": {
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "result",
+              "artifacts",
+              "blockers",
+              "risks",
+              "next_action"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "blocked"
+            ]
+          },
+          "task_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "acknowledgment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "destination": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+            "type": "string"
+          },
+          "in_reply_to": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": false,
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "acknowledged"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision"
+          },
+          "payload": {
+            "properties": {
+              "requires_approval": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "awaiting_approval"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision"
+          },
+          "payload": {
+            "properties": {
+              "requires_approval": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "accepted"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "correlation_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+      "type": "string"
+    },
+    "destination": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "in_reply_to": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "enum": [
+        "state",
+        "decision",
+        "approval",
+        "task",
+        "handoff",
+        "report",
+        "acknowledgment"
+      ]
+    },
+    "message_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "project_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": "0.1"
+    },
+    "source": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(?![\\s\\S])",
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "summary": {
+      "pattern": "\\S",
+      "type": "string"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timestamp": {
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z(?![\\s\\S])",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "message_id",
+    "project_id",
+    "kind",
+    "source",
+    "destination",
+    "correlation_id",
+    "task_id",
+    "in_reply_to",
+    "timestamp",
+    "status",
+    "summary",
+    "payload",
+    "extensions"
+  ],
+  "title": "Agent Bridge v0.1 message",
+  "type": "object"
+}

@@ -1,0 +1,13 @@
+"""Storage contract. Callers hold transaction() while reading or appending."""
+
+from contextlib import AbstractContextManager
+from typing import Protocol
+
+from ..protocol import Message
+
+
+class Store(Protocol):
+    def transaction(self) -> AbstractContextManager[None]: ...
+    def config(self) -> dict: ...
+    def read(self) -> list[Message]: ...
+    def append(self, message: Message) -> None: ...

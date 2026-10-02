@@ -1,0 +1,26 @@
+{
+  "protocol_version": "0.1",
+  "message_id": "22222222-2222-4222-8222-222222222222",
+  "project_id": "11111111-1111-4111-8111-111111111111",
+  "kind": "handoff",
+  "source": "chatgpt",
+  "destination": "codex",
+  "correlation_id": "33333333-3333-4333-8333-333333333333",
+  "task_id": "33333333-3333-4333-8333-333333333333",
+  "in_reply_to": "44444444-4444-4444-8444-444444444444",
+  "timestamp": "2026-10-02T10:00:00Z",
+  "status": "handed_off",
+  "summary": "Validate a synthetic sample",
+  "payload": {
+    "instructions": "Inspect the sample, validate it and return a structured report.",
+    "context": {
+      "project_state": {"milestone": "v0.1", "input": "Synthetic sample only"},
+      "decisions": [{"summary": "Use the local workflow", "status": "accepted"}],
+      "task": {"title": "Validate a synthetic sample", "description": "No external data needed"}
+    },
+    "blockers": [],
+    "risks": ["Verify agent claims before acknowledging completion"],
+    "next_action": "Acknowledge the handoff, validate the sample and report."
+  },
+  "extensions": {"org.example.runner": {"mode": "synthetic"}}
+}
