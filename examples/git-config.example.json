@@ -1,0 +1,11 @@
+{
+  "format": "agentbridge-git/1",
+  "project_id": "11111111-1111-4111-8111-111111111111",
+  "repo": "/path/to/trusted-mailbox-clone",
+  "git_dir": "/path/to/trusted-mailbox-clone/.git",
+  "remote": "origin",
+  "endpoint": "https://example.invalid/community/agent-mailbox.git",
+  "branch": "agentbridge",
+  "push": false,
+  "object_format": "sha1"
+}

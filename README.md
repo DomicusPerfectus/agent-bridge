@@ -1,9 +1,15 @@
 # Agent Bridge
 
+> Stop copying plans, decisions, context and reports manually between AI agents.
+
 Structured context, decisions, tasks and results between AI systems and coding
-agents. Agent Bridge v0.1 is a local-first Python CLI and library with a
+agents. Agent Bridge v0.2 is a local-first Python CLI and library with a
 provider-neutral JSON protocol. It has **no runtime dependencies**, requires
 Python 3.11+, and needs no API key, paid service, Docker stack or network daemon.
+
+Agent Bridge is a provider-neutral handoff/context protocol plus transport and
+reference implementation. It is not an AI model or an agent executor. v0.2 adds
+explicit Git/GitHub delivery; the canonical envelope remains protocol **0.1**.
 
 The first reference workflow is ChatGPT ↔ Agent Bridge ↔ Codex. The same protocol
 can address Claude, Gemini, Cursor, Aider, Hermes, MindOS or your own agent using
@@ -155,16 +161,59 @@ Read the [architecture](docs/architecture.md), [protocol specification](docs/pro
 [contribution guide](CONTRIBUTING.md). An [example configuration](examples/config.example.json)
 shows the generated config shape; use `init` to generate a fresh project identity.
 
-Git/GitHub transport is an extension point, not a requirement. v0.1 supports one
-shared local project directory and does not implement remote delivery or Git
-merge conflict resolution.
+Git is optional. Local-only workflows continue to work with no Git configuration.
+For connected delivery, see the [Git transport guide](docs/git-transport.md).
+
+## Git/GitHub delivery
+
+Use an existing trusted Git checkout with a configured remote. The transport
+keeps an isolated bare cache in `.agentbridge/`, commits only its packet artifacts
+and publishes a dedicated branch (default `agentbridge`). GitHub is one possible
+host; no repository is created automatically.
+
+```sh
+agentbridge init --project "Sample project"
+agentbridge git init --repo PATH_TO_EXISTING_CLONE --remote origin --branch agentbridge
+agentbridge git status
+agentbridge git sync
+agentbridge git publish --push
+```
+
+The second agent joins the same project with
+`agentbridge init --project-id PROJECT_UUID`, then configures its own existing
+clone. Get that stable UUID from the first agent's `status` output. Envelopes,
+context and reports are subsequently exchanged automatically through Git.
+
+`git status` reports cached transport state; ordinary `status` reports local
+application state. `git fetch` fetches, validates and ingests only. `git publish`
+and `git sync` fetch, reconcile, ingest and create transport commits. **Push is
+off by default**; use `--push`, or explicitly opt in with `git init
+--push-by-default`. `--no-push` overrides that policy for one operation.
+
+Publication exports every recorded local envelope for this project, including
+context. Use a separate bridge project containing reviewed, shareable summaries
+when your coding repository contains private data. Authentication uses the
+machine's existing Git/SSH mechanisms; no tokens belong in bridge config.
+
+Offline E2E, using a new empty scratch directory:
+
+```sh
+python examples/git_demo.py --root .validation/git-demo
+```
+
+It uses two clones, separate CLI processes and a local bare remote, completes a
+task in both replicas and checks repeated sync. No GitHub credentials or internet
+are needed. See the [Codex and app integration patterns](docs/adapters.md).
 
 ## Release status
 
-This is a v0.1 foundation. There is no automatic execution, provider connection,
-background watcher, authentication, encryption, distributed synchronization or
+This is a v0.2 foundation. There is no automatic execution, provider connection,
+background watcher, authentication, encryption or
 conversation-history access. The local log is intended for small projects.
 
-**A license has not been chosen.** The pre-existing `LICENSE` file is an empty
-placeholder; it grants no open-source license. Choose and add a license before
-public distribution. No package or repository has been published by this work.
+Git sync is explicit and rejects conflicting histories; it is not a distributed
+task scheduler. Concurrent conflicting changes to the same task require review.
+
+Licensed under [Apache License 2.0](LICENSE), with a neutral community notice in
+[NOTICE](NOTICE). See [CHANGELOG.md](CHANGELOG.md). No package, public repository,
+release or tag has been published by this work.

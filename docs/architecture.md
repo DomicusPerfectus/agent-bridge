@@ -86,8 +86,9 @@ The inbox includes receipt notifications, which are informational and cannot be
 acknowledged recursively. Completion and approval are governed by workflow
 rules, not inbox removal.
 
-Future Git, HTTP or MCP transports can carry the same canonical envelopes. They
-must handle authentication, idempotency, causality and synchronization explicitly.
+GitTransport now carries canonical envelopes through an explicit mailbox branch.
+Future HTTP or MCP transports can use the same boundary. Authentication,
+idempotency, causality and synchronization remain explicit integration concerns.
 Copying individual JSON files into the local log is unsupported; use `receive`
 or `import` so that validation and local ordering remain intact.
 
@@ -118,3 +119,26 @@ belong outside the protocol log.
 - Claimed identities and local file access: small scope with a documented trust
   boundary; authentication belongs in a future connected integration.
 - No automatic provider access, network transport, executor or Git sync in v0.1.
+
+## v0.2 Git delivery
+
+GitTransport retains the `Transport.inbox()` contract and adds explicit
+`fetch`, `publish` and `sync`. `Bridge.open()` loads optional local Git metadata;
+`Bridge.sync()` delegates to the configured transport. Canonical configuration
+and events retain the v0.1 local shape. Git settings live separately in the
+ignored `.agentbridge/git.json`.
+
+Git is packet transport, not application state. A pinned existing checkout and
+remote supply the endpoint. An isolated bare cache and private index build
+transport commits using Git plumbing. Remote trees are read as inert blobs.
+The application's code branch, working tree and index are not used for delivery.
+Canonical events reach the bridge through `Bridge.receive()` after whole-batch
+preflight. Dependency sidecars preserve ingestion relationships that are not
+encoded in the canonical envelope, including receipt-before-report and human
+approval-before-dispatch.
+
+Only explicit `--push` or persisted opt-in enables push. One rejected-push retry
+fetches and reconciles; incompatible histories fail with cached work preserved.
+Git is required only for these operations; provider credentials remain outside
+the bridge. See [Git transport](git-transport.md) for exact artifacts, limits,
+causality, recovery and threat boundaries. Protocol 0.1 is unchanged.

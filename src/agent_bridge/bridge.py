@@ -17,15 +17,48 @@ class Bridge:
         self.transport = transport or LocalTransport()
 
     @classmethod
-    def initialize(cls, root: Path | str, name: str = "Agent Bridge") -> "Bridge":
-        return cls(FileSystemStore.initialize(root, name))
+    def initialize(cls, root: Path | str, name: str = "Agent Bridge", *, project_id: str | None = None) -> "Bridge":
+        store = FileSystemStore.initialize(root, name, project_id)
+        return cls.open(store.root)
 
     @classmethod
     def open(cls, root: Path | str) -> "Bridge":
         bridge = cls(FileSystemStore(root))
         with bridge.store.transaction():
             bridge.store.config()
+        from .transport.git import GitTransport
+        if (bridge.store.data / "git.json").exists():
+            bridge.transport = GitTransport.open(bridge.store.root)
         return bridge
+
+    def configure_git(self, repo: Path | str, *, remote: str = "origin",
+                      branch: str = "agentbridge", push: bool = False):
+        from .transport.git import GitTransport
+        self.transport = GitTransport.configure(self, repo, remote=remote, branch=branch, push=push)
+        return self.transport.status(self)
+
+    def sync(self, *, push: bool | None = None) -> dict:
+        from .transport.git import GitTransport
+        if not isinstance(self.transport, GitTransport):
+            raise BridgeError("Git transport is not configured; run agentbridge git init")
+        return self.transport.sync(self, push=push)
+
+    def events(self) -> list[Message]:
+        """Return validated immutable envelopes for transport export."""
+        with self.store.transaction():
+            return list(self._view().messages.values())
+
+    def validate_batch(self, messages: list[Message]) -> None:
+        """Preflight a causal batch without appending anything."""
+        with self.store.transaction():
+            view = self._view()
+            for message in messages:
+                existing = view.messages.get(message.message_id)
+                if existing:
+                    if existing.to_dict() != message.to_dict():
+                        raise BridgeError("Message ID already exists with different content")
+                else:
+                    view.apply(message)
 
     def _view(self) -> ProjectView:
         return ProjectView(self.store.config(), self.store.read())

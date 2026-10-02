@@ -21,6 +21,7 @@ def parser() -> argparse.ArgumentParser:
     commands = p.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init", help="Initialize an ignored local .agentbridge directory")
     init.add_argument("--project", default="Agent Bridge", help="Public or local project label")
+    init.add_argument("--project-id", help="Join an explicitly selected existing project UUID")
     commands.add_parser("status", help="Project state, decisions and projected task statuses")
     state = commands.add_parser("state", help="Record current structured project state")
     state.add_argument("--from", dest="source", required=True)
@@ -70,6 +71,19 @@ def parser() -> argparse.ArgumentParser:
     export.add_argument("--adapter", choices=tuple(ADAPTERS), default="generic")
     ingest = commands.add_parser("import", help="Validate and ingest a canonical JSON envelope")
     ingest.add_argument("file", help="JSON file or - for stdin")
+    git = commands.add_parser("git", help="Git transport configuration and delivery; separate from local state")
+    git_commands = git.add_subparsers(dest="git_command", required=True)
+    git_init = git_commands.add_parser("init", help="Pin an existing repository and configured remote")
+    git_init.add_argument("--repo", type=Path, required=True)
+    git_init.add_argument("--remote", default="origin")
+    git_init.add_argument("--branch", default="agentbridge")
+    git_init.add_argument("--push-by-default", action="store_true", help="Explicitly authorize push on future sync/publish")
+    git_commands.add_parser("status", help="Inspect cached transport state; does not fetch")
+    git_commands.add_parser("fetch", help="Fetch, validate and ingest; does not publish")
+    for name in ("publish", "sync"):
+        action = git_commands.add_parser(name, help="Fetch, ingest and commit transport artifacts into the private cache")
+        action.add_argument("--push", action=argparse.BooleanOptionalAction, default=None,
+                            help="Push the configured transport branch; default follows explicit configuration")
     return p
 
 
@@ -86,8 +100,19 @@ def _context_flags(p):
 
 def execute(args):
     if args.command == "init":
-        return Bridge.initialize(args.root, args.project).status()
+        return Bridge.initialize(args.root, args.project, project_id=args.project_id).status()
     bridge = Bridge.open(args.root)
+    if args.command == "git":
+        if args.git_command == "init":
+            return bridge.configure_git(args.repo, remote=args.remote, branch=args.branch, push=args.push_by_default)
+        from .transport import GitTransport
+        if not isinstance(bridge.transport, GitTransport):
+            raise BridgeError("Git transport is not configured; run agentbridge git init")
+        if args.git_command == "status":
+            return bridge.transport.status(bridge)
+        if args.git_command == "fetch":
+            return bridge.transport.fetch(bridge)
+        return getattr(bridge.transport, args.git_command)(bridge, push=args.push)
     if args.command == "status":
         return bridge.status()
     if args.command == "state":

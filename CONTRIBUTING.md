@@ -1,8 +1,8 @@
 # Contributing
 
 Agent Bridge v0.1 aims for small, provider-neutral, local-first components.
-Before public collaboration starts, the maintainer must select a license and
-security contact. The existing empty LICENSE file is a placeholder.
+Contributions are under Apache License 2.0. Before public collaboration starts,
+the maintainer should establish a private security reporting contact.
 
 ## Development
 
@@ -14,12 +14,18 @@ python -m pip install -e '.[test]'
 python -m unittest discover -s tests -v
 python tools/generate_schema.py --check
 python examples/local_demo.py --root .validation/demo
+python examples/git_demo.py --root .validation/git-demo
 ```
 
 The runtime has no dependencies. `jsonschema` is used only for protocol
 conformance tests. Tests create synthetic temporary projects under the ignored
 `.validation/tests/` directory and exercise both the library and separate CLI
 processes. CI runs the same suite on Windows and Linux with Python 3.11 and 3.14.
+
+Git tests use real temporary local bare repositories and clones. They never need
+GitHub credentials or internet access. The Git demo requires a new empty scratch
+directory and does not overwrite an existing demo project. Git must be on PATH;
+the local-only runtime continues to work without Git.
 
 For an offline development environment with packaging tools and test dependencies
 already installed, add `--no-build-isolation --no-deps` to pip's install command.
@@ -54,5 +60,6 @@ and the demo. The wheel must include the protocol JSON Schema.
 After committing a change, `python tools/verify_fresh_clone.py` verifies an
 offline local clone, wheel build/install, isolated runtime, CLI initialization
 and the documented demo. It uses a temporary clone under `.validation/` and
+also checks the Git E2E demo from the installed wheel. It
 records a compact result there. Run it with a development Python that already
 has pip and setuptools. The fresh runtime has no inherited site packages.

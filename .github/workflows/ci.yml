@@ -31,5 +31,7 @@ jobs:
         run: agentbridge --version
       - name: Run local end-to-end demo
         run: python examples/local_demo.py --root .validation/ci-demo
+      - name: Run offline Git end-to-end demo
+        run: python examples/git_demo.py --root .validation/ci-git-demo
       - name: Check whitespace
         run: git diff --check

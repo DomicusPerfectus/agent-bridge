@@ -110,8 +110,77 @@ complete read/validate/write operation. `Transport.inbox()` projects addressed
 messages from a validated sequence; future remote ingestion should enter through
 `Bridge.receive()` rather than writing files directly.
 
-An HTTP/MCP/Git integration needs its own delivery/authentication layer around
+An HTTP/MCP integration needs its own delivery/authentication layer around
 these operations. Preserve project identity, message IDs and parent order;
 choose conflict handling before supporting concurrent remote writers. An
 optional Git workflow can version sanitized exported packets without making
 Git mandatory for local use. Raw `.agentbridge/` data is ignored by default.
+
+## v0.2 Git workflow for Codex
+
+Use a configured shared-project bridge and an authorized Codex session:
+
+```sh
+agentbridge git sync --no-push
+agentbridge inbox --agent codex:worker --kind handoff
+agentbridge export HANDOFF_MESSAGE_ID --adapter codex
+agentbridge acknowledge HANDOFF_MESSAGE_ID --by codex:worker
+# The authorized session performs the scoped work and validation here.
+agentbridge report TASK_ID --from codex:worker --result "Describe verified results" --next-action "Creator should review"
+agentbridge git publish --push
+```
+
+`python examples/codex_inbox.py --root PATH --agent codex:worker` combines sync
+and packet display. It does not acknowledge, execute instructions or publish.
+Execution and report claims stay with the authorized runner. Human approval
+decisions remain governed by the existing task lifecycle.
+
+## ChatGPT app/MCP boundary
+
+An authorized integration can use the generic Python API:
+
+```python
+bridge = Bridge.open("/path/to/local-shareable-bridge-project")
+bridge.sync(push=False)
+task = bridge.task(source="chatgpt:planner", destination="codex:worker",
+                   title="Sample task", description="Shareable scoped work")
+handoff = bridge.handoff(task.task_id, source="chatgpt:planner", destination="codex:worker",
+                        instructions="Perform the authorized task and report")
+bridge.sync(push=True)  # Requires actual authorization to publish this context.
+
+# On a later explicitly authorized request:
+bridge.sync(push=False)
+for report in bridge.inbox("chatgpt:planner"):
+    if report.kind == "report":
+        packet = GenericAdapter().encode(report)
+        # Present packet to the reviewer. After review/approval:
+        # bridge.acknowledge(report.message_id, actor="chatgpt:planner")
+        # bridge.sync(push=True)
+```
+
+The integration owns session authentication, consent, trusted human approvals
+and data minimization. Incoming externally prepared JSON still uses
+`GenericAdapter.decode()` followed by `Bridge.receive()`. No history access,
+OpenAI credentials or private endpoint is hardcoded. MCP scheduling and provider
+connections are future integration work, not automatic behavior of this library.
+
+## Hermes, MindOS and private organizations
+
+Use generic identifiers such as `chatgpt:planner`, `codex:worker`,
+`hermes:orchestrator` and `mindos:planner`. These are sanitized examples, not
+an internal organization configuration. Keep private deployment mappings and
+secrets in your own repository/configuration. No private integration code is
+required in the public project.
+
+```python
+bridge.sync(push=False)
+for handoff in bridge.inbox("hermes:worker"):
+    if handoff.kind == "handoff":
+        packet = GenericAdapter().encode(handoff)
+        # Inspect, acknowledge, call an authorized runner, then bridge.report().
+        # Reuse AgentAdapter; no provider-specific protocol fields are needed.
+```
+
+MindOS follows the same pattern with a different address or adapter. See the
+[Git transport guide](git-transport.md) for first-time identity joining and
+explicit publication boundaries.

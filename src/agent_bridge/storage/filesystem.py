@@ -64,14 +64,18 @@ class FileSystemStore:
         _safe(self.data / ".lock")
 
     @classmethod
-    def initialize(cls, root: Path | str, name: str) -> "FileSystemStore":
+    def initialize(cls, root: Path | str, name: str, project_id: str | None = None) -> "FileSystemStore":
         nonempty(name, "project_name")
+        if project_id is not None:
+            identifier(project_id, "project_id")
         store = cls(root)
         store.data.mkdir(exist_ok=True, mode=0o700)
         with store.transaction():
             path = store.data / "config.json"
             if path.exists():
-                store.config()  # Init is idempotent and never overwrites a project.
+                config = store.config()  # Init never overwrites an existing identity.
+                if project_id is not None and config["project_id"] != project_id:
+                    raise BridgeError("Existing bridge has a different project_id")
                 if not store.log.is_dir():
                     raise BridgeError("Initialized bridge is missing its messages directory")
             else:
@@ -80,7 +84,7 @@ class FileSystemStore:
                 store.log.mkdir(exist_ok=True, mode=0o700)
                 _atomic_write(path, {
                     "protocol_version": PROTOCOL_VERSION,
-                    "project_id": str(uuid4()), "project_name": name,
+                    "project_id": project_id or str(uuid4()), "project_name": name,
                     "created_at": utc_now(), "storage": "filesystem", "transport": "local",
                 })
         return store

@@ -61,9 +61,15 @@ def verify():
         check = (
             "import json, sys, agent_bridge; from pathlib import Path; "
             "from importlib.resources import files; "
+            "from importlib.metadata import distribution; "
             "assert Path(agent_bridge.__file__).is_relative_to(Path(sys.prefix)); "
+            "d=distribution('agent-bridge'); assert d.version==agent_bridge.__version__; "
+            "assert not d.requires or all('extra ==' in r for r in d.requires); "
+            "assert any(str(f).endswith('/LICENSE') for f in d.files); "
+            "assert any(str(f).endswith('/NOTICE') for f in d.files); "
             "s=json.loads(files('agent_bridge.protocol').joinpath('schema.json').read_text()); "
-            "assert s['title']=='Agent Bridge v0.1 message'; print('wheel schema and isolated import: PASS')"
+            "assert s['title']=='Agent Bridge v0.1 message'; "
+            "print('wheel metadata, license, schema and isolated import: PASS')"
         )
         print(run([python, "-I", "-c", check], clone, env))
         initialized = json.loads(run([cli, "init", "--project", "Fresh clone sample"], clone, env))
@@ -75,11 +81,14 @@ def verify():
         status = json.loads(run([cli, "--root", demo_root, "status"], clone, env))
         if len(status["tasks"]) != 1 or status["tasks"][0]["status"] != "completed":
             raise RuntimeError("Fresh clone demo did not complete")
+        print(run([python, "examples/git_demo.py", "--root", clone / ".validation" / "git-demo"], clone, env))
         if run(["git", "status", "--porcelain"], clone, env):
             raise RuntimeError("Documented demo created non-ignored files")
         result = {"status": "PASS", "revision": revision, "version": version,
                   "fresh_clone": True, "wheel_install": True, "isolated_runtime": True,
                   "packaged_schema": True, "demo_task_status": "completed",
+                  "packaged_license": True, "packaged_notice": True,
+                  "git_e2e": True,
                   "network_required": False, "runtime_git_status": "clean"}
     (workspace / "fresh-clone-result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
