@@ -27,6 +27,15 @@ joins with `agentbridge init --project-id PROJECT_UUID`, then configures its own
 clone of the same mailbox. Existing bridge identity is never overwritten; a
 mismatched explicit UUID fails. Project labels may differ between participants.
 
+Initialization protects runtime data in the bridge root's worktree. It verifies
+that `.agentbridge/` is untracked and ignored, and appends a scoped anchored rule
+to Git's resolved local `info/exclude` only when needed. Existing bytes are
+preserved; linked worktrees can share the main worktree's file. No tracked
+`.gitignore`, index, branch or Git configuration is edited. Git configuration
+also rechecks protection, covering a bridge created before its worktree existed.
+With Git available, an unprotectable runtime path stops initialization with a
+warning/error. Git-unavailable local mode warns when a worktree marker is found.
+
 `.agentbridge/git.json` records the normalized local repository path, actual Git
 directory, selected remote name, pinned endpoint, branch, project ID, object
 format and explicit push policy. The file is private/local and Git-ignored.
@@ -136,6 +145,30 @@ Default output is JSON; errors have a nonzero exit code. Fetch errors withhold
 raw Git stderr to avoid logging credentials. Check the endpoint, permissions,
 authentication and branch locally when Git access fails.
 
+### Local status and known remote delivery
+
+`git status` performs no network operation. Its counts refer to the current
+local log/cache and the last accepted remote snapshot (validated fetch or a
+successful explicit push):
+
+| Field | Meaning |
+| --- | --- |
+| `local_event_count` | Validated canonical events in the local application log |
+| `local_events_not_cached` | Local events absent from the transport cache |
+| `cached_packet_count`, `cached_commit` | Packets and commit present in the private transport cache |
+| `accepted_remote_commit`, `accepted_remote_packet_count` | Last accepted remote snapshot and its packet count |
+| `remote_snapshot_known` | Whether an accepted branch snapshot exists locally |
+| `cached_packets_pending_remote_delivery` | Cached packet IDs absent from that accepted snapshot |
+| `local_events_pending_remote_delivery` | Local event IDs absent from that accepted snapshot, including uncached events |
+
+A no-push publication can have zero uncached events while cached packets still
+await remote delivery. After a successful push, those packets are accepted and
+their pending count is zero. Fetch-only ingestion can produce local events
+already accepted remotely but not yet in the local cache. Counts do not assert
+that the current server still matches an earlier observation; use fetch/sync
+to refresh it. Without an accepted snapshot, remote counts are zero and the
+snapshot-known flag is false. See CHANGELOG.md for the pre-public field renames.
+
 ```python
 from agent_bridge import Bridge
 
@@ -162,6 +195,10 @@ Large pack transfers can consume disk before artifact checks; Git transport is
 not a sandbox for arbitrary hostile servers or oversized repositories. Use a
 reviewed mailbox repository and OS quotas when required.
 
+Timeout/overflow cleanup terminates the spawned process group on POSIX or process
+tree on Windows, reaps Git and joins pipe workers with bounded waits. Cleanup
+has a short bounded grace period beyond the execution timeout.
+
 A candidate validation error imports nothing from that batch. After preflight,
 individual receipts/imports are atomic local events. A concurrent local change,
 disk failure or process crash may leave a valid ingested prefix; retry resumes
@@ -174,3 +211,10 @@ writer's lock. The same rule applies to the canonical `.lock`. Do not delete a
 cache containing unpublished work to recover a conflict. Preserve it and resolve
 the conflicting protocol action with human review; automatic history rewriting
 or task arbitration is outside v0.2.
+
+The sync lock wait is bounded to five seconds, and a stale lock is never stolen.
+Initialization also uses a five-second bounded local lock beside Git's exclusion
+file (`info/exclude.agentbridge.lock`). Only remove a stale lock after confirming
+all relevant writers have stopped. An interrupted import can retain a valid
+prefix; a rejected push retains cached work. Retry is idempotent after the
+underlying problem is resolved.

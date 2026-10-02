@@ -86,6 +86,8 @@ class GitTransport(LocalTransport):
         validate_branch(branch)
         if type(push) is not bool:
             raise BridgeError("push must be a boolean")
+        from ..storage.git_exclude import protect_runtime
+        protect_runtime(bridge.store.root)
         repo, git_dir, url, object_format = cls._repository(repo, remote)
         snapshot = bridge.status()
         config = {"format": "agentbridge-git/1", "project_id": snapshot["project_id"],
@@ -160,13 +162,18 @@ class GitTransport(LocalTransport):
             self._check(bridge)
             commit = self.git.oid(LOCAL_REF)
             packets = read_packets(self.git, commit, self.config["project_id"])
+            accepted = self.git.oid(ACCEPTED_REF)
+            remote = packets if accepted == commit else read_packets(self.git, accepted, self.config["project_id"])
             events = bridge.events()
             return {"transport": "git", "project_id": self.config["project_id"],
                     "repo": self.config["repo"], "remote": self.config["remote"], "branch": self.config["branch"],
                     "push_by_default": self.config["push"], "cached_commit": commit,
-                    "accepted_remote_commit": self.git.oid(ACCEPTED_REF),
-                    "cached_message_count": len(packets), "local_message_count": len(events),
-                    "unpublished_local_messages": sum(m.message_id not in packets for m in events)}
+                    "accepted_remote_commit": accepted, "remote_snapshot_known": accepted is not None,
+                    "accepted_remote_packet_count": len(remote),
+                    "cached_packet_count": len(packets), "local_event_count": len(events),
+                    "local_events_not_cached": sum(m.message_id not in packets for m in events),
+                    "cached_packets_pending_remote_delivery": len(packets.keys() - remote.keys()),
+                    "local_events_pending_remote_delivery": sum(m.message_id not in remote for m in events)}
 
     def _fetch(self) -> str | None:
         ref = "refs/heads/" + self.config["branch"]
@@ -294,7 +301,7 @@ class GitTransport(LocalTransport):
                     self.git.update(ACCEPTED_REF, commit, accepted)
                 return {"status": "PASS", "transport": "git", "operation": "sync", "project_id": self.config["project_id"],
                         "remote_commit": remote_commit, "cached_commit": commit, "ingested": ingested,
-                        "published_to_cache": published, "cached_message_count": count,
+                        "published_to_cache": published, "cached_packet_count": count,
                         "pushed": push, "push_attempts": attempt + 1 if push else 0}
         raise BridgeError("BLOCKED: sync did not complete")
 

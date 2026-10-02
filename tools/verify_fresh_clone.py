@@ -85,6 +85,7 @@ def verify():
         if run(["git", "status", "--porcelain"], clone, env):
             raise RuntimeError("Documented demo created non-ignored files")
         result = {"status": "PASS", "revision": revision, "version": version,
+                  "platform": sys.platform, "python": sys.version.split()[0],
                   "fresh_clone": True, "wheel_install": True, "isolated_runtime": True,
                   "packaged_schema": True, "demo_task_status": "completed",
                   "packaged_license": True, "packaged_notice": True,

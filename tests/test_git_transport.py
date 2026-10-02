@@ -26,7 +26,7 @@ class GitTransportTests(GitTestCase):
         before = self.ba.status()
         empty = configured.sync()
         self.assertEqual(empty["ingested"], 0)
-        self.assertEqual(empty["cached_message_count"], 0)
+        self.assertEqual(empty["cached_packet_count"], 0)
         self.assertFalse(empty["pushed"])
         self.assertEqual(self.ba.status(), before)
         self.assertEqual(self.ba.configure_git(self.a)["cached_commit"], empty["cached_commit"])

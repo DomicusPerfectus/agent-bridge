@@ -69,6 +69,8 @@ class FileSystemStore:
         if project_id is not None:
             identifier(project_id, "project_id")
         store = cls(root)
+        from .git_exclude import protect_runtime
+        protect_runtime(store.root)
         store.data.mkdir(exist_ok=True, mode=0o700)
         with store.transaction():
             path = store.data / "config.json"

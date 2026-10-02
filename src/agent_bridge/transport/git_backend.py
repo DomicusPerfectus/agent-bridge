@@ -4,8 +4,10 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
-from threading import Thread
+from threading import Lock, Thread
+import time
 from urllib.parse import urlsplit
 
 from ..protocol import BridgeError
@@ -95,9 +97,41 @@ class GitBackend:
         overflow: list[bool] = []
         try:
             process = subprocess.Popen(command, stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, shell=False)
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, shell=False,
+                                       start_new_session=os.name != "nt",
+                                       creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW)
+                                       if os.name == "nt" else 0)
         except OSError as exc:
             raise BridgeError("Unable to start the Git executable") from exc
+
+        stopping = Lock()
+        stopped = False
+
+        def stop():
+            nonlocal stopped
+            with stopping:
+                if stopped:
+                    return
+                stopped = True
+                if os.name == "nt":
+                    if process.poll() is None:
+                        taskkill = Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/taskkill.exe"
+                        try:
+                            subprocess.run([str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                           timeout=2, shell=False, creationflags=subprocess.CREATE_NO_WINDOW)
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+                else:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
 
         def drain(stream, maximum, keep=False):
             size = 0
@@ -106,10 +140,7 @@ class GitBackend:
                     size += len(chunk)
                     if size > maximum:
                         overflow.append(True)
-                        try:
-                            process.kill()
-                        except OSError:
-                            pass
+                        stop()
                         break
                     if keep:
                         output.extend(chunk)
@@ -130,17 +161,38 @@ class GitBackend:
         writer = Thread(target=feed, daemon=True) if data is not None else None
         if writer:
             writer.start()
+        timed_out = False
+        threads = readers + ([writer] if writer else [])
         try:
             process.wait(timeout=self.timeout)
-        except subprocess.TimeoutExpired as exc:
-            process.kill()
-            process.wait(timeout=5)
-            raise BridgeError(f"Git {operation} timed out after {self.timeout:g} seconds") from exc
-        for thread in readers:
-            thread.join(timeout=2)
-        if writer:
-            writer.join(timeout=2)
-        if overflow or any(thread.is_alive() for thread in readers):
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            stop()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired as exc:
+                raise BridgeError(f"Git {operation} could not be terminated during timeout cleanup") from exc
+        finally:
+            # Also reap on KeyboardInterrupt or an unexpected wait failure.
+            if process.poll() is None:
+                stop()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired as exc:
+                    raise BridgeError(f"Git {operation} could not be reaped during interruption cleanup") from exc
+            deadline = time.monotonic() + 2
+            for thread in threads:
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+            if any(thread.is_alive() for thread in threads):
+                stop()
+                deadline = time.monotonic() + 2
+                for thread in threads:
+                    thread.join(timeout=max(0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            raise BridgeError(f"Git {operation} pipe cleanup exceeded its bound")
+        if timed_out:
+            raise BridgeError(f"Git {operation} timed out after {self.timeout:g} seconds; process cleanup completed")
+        if overflow:
             raise BridgeError(f"Git {operation} exceeded its output bound")
         if process.returncode not in allowed:
             raise GitError(operation, process.returncode)

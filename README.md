@@ -3,7 +3,7 @@
 > Stop copying plans, decisions, context and reports manually between AI agents.
 
 Structured context, decisions, tasks and results between AI systems and coding
-agents. Agent Bridge v0.2 is a local-first Python CLI and library with a
+agents. Agent Bridge 0.2.1 is a local-first Python CLI and library with a
 provider-neutral JSON protocol. It has **no runtime dependencies**, requires
 Python 3.11+, and needs no API key, paid service, Docker stack or network daemon.
 
@@ -49,13 +49,20 @@ report → task status becomes `completed`. All demo data is synthetic and local
 The demo can be run repeatedly. An actual agent runner supplies execution between
 handoff acknowledgment and report creation.
 
-For runtime-only installation, use `python -m pip install .`. The optional `test`
-extra supplies JSON Schema validation for the test suite. With setuptools, pip
-and the test dependencies already available, offline installation is possible
-with `python -m pip install --no-build-isolation --no-deps -e .`.
-`python -m agent_bridge` is equivalent to `agentbridge`.
+For runtime-only installation, Windows uses
+`.\.venv\Scripts\python.exe -m pip install .`; activated Linux/macOS uses
+`python -m pip install .`. The optional `test` extra supplies JSON Schema
+validation for the test suite. With packaging tools and test dependencies
+already available, append `--no-index --no-build-isolation --no-deps` to your
+platform's pip command for offline installation. The equivalent module entry
+point is `.\.venv\Scripts\python.exe -m agent_bridge` on Windows or
+`python -m agent_bridge` in the activated Linux/macOS environment.
 
 ## Commands
+
+Windows examples use the venv executables directly. Linux/macOS examples assume
+the environment was activated as shown above. The command table uses the short
+program name to describe flags independently of the executable path.
 
 Global options precede the command: `agentbridge --root PATH --format markdown status`.
 The default output is JSON; errors go to stderr with a nonzero exit status.
@@ -83,6 +90,23 @@ Artifact references are stored as strings, never executed or opened by the bridg
 
 Manual flow (replace IDs with the JSON output from the preceding command):
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\agentbridge.exe task --from chatgpt --to codex --title "Check sample" --description "Validate synthetic input"
+.\.venv\Scripts\agentbridge.exe handoff TASK_ID --from chatgpt --to codex --instructions "Validate the sample and report"
+.\.venv\Scripts\agentbridge.exe inbox --agent codex --kind handoff
+.\.venv\Scripts\agentbridge.exe export HANDOFF_MESSAGE_ID --adapter codex
+.\.venv\Scripts\agentbridge.exe acknowledge HANDOFF_MESSAGE_ID --by codex
+.\.venv\Scripts\agentbridge.exe report TASK_ID --from codex --result "Sample passed" --next-action "Review the result"
+.\.venv\Scripts\agentbridge.exe inbox --agent chatgpt --kind report
+.\.venv\Scripts\agentbridge.exe export REPORT_MESSAGE_ID --adapter chatgpt
+.\.venv\Scripts\agentbridge.exe acknowledge REPORT_MESSAGE_ID --by chatgpt
+.\.venv\Scripts\agentbridge.exe status
+```
+
+Linux/macOS:
+
 ```sh
 agentbridge task --from chatgpt --to codex --title "Check sample" --description "Validate synthetic input"
 agentbridge handoff TASK_ID --from chatgpt --to codex --instructions "Validate the sample and report"
@@ -101,6 +125,17 @@ requires a **message ID**, not a task ID. The inbox also contains task creation
 messages and receipt notifications; use `--kind` to select a workflow step.
 
 ## Human approval
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\agentbridge.exe decision --from chatgpt --to human:reviewer --summary "Approve sample work" --rationale "Review the scope" --requires-approval
+.\.venv\Scripts\agentbridge.exe task --from chatgpt --to codex --title "Sample work" --description "Synthetic task" --approval DECISION_MESSAGE_ID
+.\.venv\Scripts\agentbridge.exe approve DECISION_MESSAGE_ID --by human:reviewer --outcome approved --rationale "Scope reviewed"
+.\.venv\Scripts\agentbridge.exe handoff TASK_ID --from chatgpt --to codex --instructions "Run approved work"
+```
+
+Linux/macOS:
 
 ```sh
 agentbridge decision --from chatgpt --to human:reviewer --summary "Approve sample work" --rationale "Review the scope" --requires-approval
@@ -143,7 +178,19 @@ provider dependency or hardcoded list of allowed agents.
 JSON log under `.agentbridge/messages/`. Current state and task statuses are
 derived from that log. Markdown exports are views, not an additional source of
 truth. Existing local Markdown placeholders are preserved and not auto-imported.
-The complete `.agentbridge/` directory is ignored by Git by default.
+When the project is inside a Git worktree, `init` verifies that runtime files
+are untracked and locally ignored. If needed, it appends an anchored rule to
+Git's resolved `info/exclude`, preserving existing contents. This handles nested
+projects and linked worktrees, whose exclusion file can be shared with the main
+worktree. It leaves tracked `.gitignore`, Git configuration, branches and the
+index untouched. An existing effective ignore rule needs no metadata edit.
+
+If Git can run but protection fails, initialization stops before creating new
+runtime state and explains the failure. If Git is unavailable, local mode
+continues with a warning when a Git marker is detected; keep runtime data out
+of staging and rerun `init` when Git becomes available. Rerun `init` after
+moving a project into a checkout or changing ignore rules. Git ignores protect
+ordinary staging; a deliberate force-add can still stage ignored files.
 
 | Location | Responsibility |
 | --- | --- |
@@ -171,6 +218,18 @@ keeps an isolated bare cache in `.agentbridge/`, commits only its packet artifac
 and publishes a dedicated branch (default `agentbridge`). GitHub is one possible
 host; no repository is created automatically.
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\agentbridge.exe init --project "Sample project"
+.\.venv\Scripts\agentbridge.exe git init --repo PATH_TO_EXISTING_CLONE --remote origin --branch agentbridge
+.\.venv\Scripts\agentbridge.exe git status
+.\.venv\Scripts\agentbridge.exe git sync
+.\.venv\Scripts\agentbridge.exe git publish --push
+```
+
+Linux/macOS:
+
 ```sh
 agentbridge init --project "Sample project"
 agentbridge git init --repo PATH_TO_EXISTING_CLONE --remote origin --branch agentbridge
@@ -197,6 +256,14 @@ machine's existing Git/SSH mechanisms; no tokens belong in bridge config.
 
 Offline E2E, using a new empty scratch directory:
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe examples/git_demo.py --root .validation/git-demo
+```
+
+Linux/macOS:
+
 ```sh
 python examples/git_demo.py --root .validation/git-demo
 ```
@@ -207,8 +274,9 @@ are needed. See the [Codex and app integration patterns](docs/adapters.md).
 
 ## Release status
 
-This is a v0.2 foundation. There is no automatic execution, provider connection,
-background watcher, authentication, encryption or
+This is a 0.2.1 candidate for private hosted CI and a final readiness review.
+There is no automatic execution, provider connection, background watcher,
+authentication, encryption or
 conversation-history access. The local log is intended for small projects.
 
 Git sync is explicit and rejects conflicting histories; it is not a distributed
@@ -217,3 +285,6 @@ task scheduler. Concurrent conflicting changes to the same task require review.
 Licensed under [Apache License 2.0](LICENSE), with a neutral community notice in
 [NOTICE](NOTICE). See [CHANGELOG.md](CHANGELOG.md). No package, public repository,
 release or tag has been published by this work.
+
+Public launch requires the [publication checklist](docs/publication-checklist.md),
+including Ubuntu CI evidence and private vulnerability-reporting verification.

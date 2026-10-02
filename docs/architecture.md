@@ -142,3 +142,28 @@ fetches and reconciles; incompatible histories fail with cached work preserved.
 Git is required only for these operations; provider credentials remain outside
 the bridge. See [Git transport](git-transport.md) for exact artifacts, limits,
 causality, recovery and threat boundaries. Protocol 0.1 is unchanged.
+
+## 0.2.1 safeguards and release validation
+
+Initialization detects Git worktree markers and verifies runtime data is untracked
+and excluded. When needed, it appends a scoped rule to Git's resolved local
+`info/exclude`, including the shared file for linked worktrees. Existing contents
+are preserved under a separate bounded exclusion lock. Tracked ignore rules,
+configuration, branches and the index remain untouched. Working Git with failed
+protection stops new initialization; Git-unavailable local mode warns and remains
+usable. This safeguard also runs before Git transport configuration.
+
+Transport status uses local events, the cached packet snapshot and the last
+accepted remote snapshot as separate sets. Pending-delivery counts are relative
+to that accepted observation; status itself performs no network access. A
+successful cache commit can still contain undelivered packets.
+
+Git execution uses argument arrays and bounded pipe workers. Timeout/overflow
+cleanup targets only the spawned process group/tree, reaps Git and joins the
+workers. Tests cover real rejected pushes, one reconciliation retry, preserved
+unpublished work, valid-prefix interruption replay and manual stale-lock recovery.
+
+Private hosted CI runs Windows/Ubuntu with Python 3.11 and 3.14, including the
+full suite, schema, Git demo and isolated wheel/fresh-clone verification. The
+workflow is preparation; Linux PASS requires an actual successful Ubuntu run.
+Public launch follows the publication checklist and GitHub private reporting policy.
