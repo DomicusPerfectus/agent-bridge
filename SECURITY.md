@@ -111,10 +111,14 @@ Each Git subprocess has a 30-second timeout, bounded stdout/stderr and disabled
 interactive credential prompts. Raw Git stderr is withheld from bridge errors
 to avoid credential leaks. Remote branch writes can invoke the server's own
 authorized hooks; no client-side bridge message controls those policies.
-Timeout/output-limit cleanup terminates the spawned process group on POSIX, or
-the spawned process tree using Windows taskkill, then reaps Git and joins pipe
-workers with bounded cleanup waits. It never targets unrelated processes.
-Caller interruption uses the same cleanup and reaps Git before propagating the interrupt.
+Git starts suspended on Windows, is assigned to a kill-on-close Job Object,
+then resumes; its descendants stay in that job after the parent exits.
+Cleanup terminates that job (or the spawned process group on POSIX), reaps Git
+and joins pipe workers within a shared six-second cleanup bound. Windows can
+cancel blocked synchronous worker I/O so workers close their own pipes. Cleanup
+errors are reported; an active caller interruption retains its original type
+and receives a diagnostic note if cleanup fails. Cleanup targets the spawned
+group/job and its pipe workers.
 
 The code checkout, active branch and user index are never used for transport
 commits. Only deterministic packet pairs are added to a private index. Existing

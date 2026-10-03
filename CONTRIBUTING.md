@@ -10,7 +10,7 @@ Use Python 3.11+. Windows PowerShell, without activating the environment:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[test]" setuptools wheel
+.\.venv\Scripts\python.exe -m pip install -e ".[test]" "setuptools>=68" wheel
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe tools/generate_schema.py --check
 .\.venv\Scripts\python.exe examples/local_demo.py --root .validation/demo
@@ -22,7 +22,7 @@ Linux/macOS, with the environment activated:
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[test]' setuptools wheel
+python -m pip install -e '.[test]' "setuptools>=68" wheel
 python -m unittest discover -s tests -v
 python tools/generate_schema.py --check
 python examples/local_demo.py --root .validation/demo

@@ -9,8 +9,8 @@
 - Fix Windows command examples and adopt GitHub Private Vulnerability Reporting
   as the public-launch policy, with a publication checklist and platform constraint.
 - Prepare Windows/Ubuntu CI for Python 3.11 and 3.14, verbose recovery tests,
-  installed-wheel verification and the full offline Git demo. Ubuntu PASS remains
-  pending a real hosted run.
+  installed-wheel verification and the full offline Git demo. The pre-release
+  hosted matrix has passed on Windows/Ubuntu with Python 3.11 and 3.14.
 - Reap timed-out/interrupted Git process trees/groups and pipe workers with bounded cleanup;
   test real push rejection/reconciliation, blocked retry, preserved cached work,
   interruption replay and manual stale-lock recovery.

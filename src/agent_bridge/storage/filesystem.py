@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 import time
 from uuid import uuid4
@@ -14,8 +15,24 @@ from ..protocol.message import MAX_MESSAGE_BYTES, identifier, nonempty, timestam
 EVENT_FILE = re.compile(r"^(\d{12})_([0-9a-f-]{36})\.json$")
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        metadata = os.lstat(path)  # Inspect the link itself, including dangling junctions.
+    except FileNotFoundError:
+        return False  # Future storage paths are valid during initialization.
+    # These Windows metadata fields/constants exist since Python 3.8. Reject
+    # link tags specifically, not unrelated reparse types such as cloud files.
+    return (metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT != 0
+            and metadata.st_reparse_tag in (stat.IO_REPARSE_TAG_MOUNT_POINT,
+                                           stat.IO_REPARSE_TAG_SYMLINK))
+
+
 def _safe(path: Path) -> None:
-    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+    if _is_link_or_junction(path):
         raise BridgeError(f"Symlink/junction is not allowed in bridge storage: {path.name}")
 
 

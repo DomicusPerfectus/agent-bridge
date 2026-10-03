@@ -1,9 +1,15 @@
+import os
 from pathlib import Path
+import stat
+import subprocess
+from types import SimpleNamespace
+import unittest
 from unittest.mock import patch
 
 from agent_bridge import Bridge, BridgeError
 from agent_bridge.protocol import json_dumps
 from agent_bridge.storage import FileSystemStore
+from agent_bridge.storage.filesystem import _safe
 from tests.support import BridgeTestCase
 
 
@@ -56,15 +62,70 @@ class StorageTests(BridgeTestCase):
         with self.assertRaisesRegex(BridgeError, "sequence"):
             self.bridge.status()
 
-    def test_symlinks_and_junctions_are_rejected(self):
-        # Windows may restrict actual symlink creation; exercise both guard branches.
+    def test_symlinks_are_rejected(self):
+        # Windows may restrict symlink creation; retain the synthetic guard coverage.
         with patch.object(Path, "is_symlink", return_value=True):
             with self.assertRaisesRegex(BridgeError, "Symlink/junction"):
                 FileSystemStore(self.root)
-        if hasattr(Path, "is_junction"):
-            with patch.object(Path, "is_junction", return_value=True):
+
+    def test_ordinary_directory_and_missing_storage_paths_are_accepted(self):
+        _safe(self.root)
+        project = self.root / "future project"
+        project.mkdir()
+        _safe(project / ".agentbridge")
+        _safe(project / ".agentbridge" / "messages")
+        self.assertFalse((project / ".agentbridge").exists())
+        FileSystemStore(project)
+        initialized = Bridge.initialize(project, "Synthetic future storage")
+        self.assertEqual(initialized.status()["message_count"], 0)
+
+    @unittest.skipUnless(os.name == "nt", "Windows directory junction regression")
+    def test_real_windows_junction_rejected_without_path_is_junction(self):
+        project = self.root / "junction project"
+        target = self.root / "junction target"
+        project.mkdir()
+        target.mkdir()
+        sentinel = target / "sentinel.txt"
+        sentinel.write_text("Synthetic target must remain intact", encoding="utf-8")
+        junction = project / ".agentbridge"
+        try:
+            # Fixed relative arguments avoid interpolating workspace paths into
+            # cmd's command language. /d and /v:off disable autorun/expansion.
+            created = subprocess.run(["cmd.exe", "/d", "/v:off", "/c", "mklink", "/J",
+                                      ".agentbridge", "..\\junction target"], cwd=project,
+                                     capture_output=True, text=True, timeout=10, shell=False)
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            metadata = os.lstat(junction)
+            self.assertTrue(metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+            self.assertEqual(metadata.st_reparse_tag, stat.IO_REPARSE_TAG_MOUNT_POINT)
+            with self.assertRaisesRegex(BridgeError, "Symlink/junction"):
+                FileSystemStore(project)
+            # Python 3.11 executes the real check above without this Path API.
+            # On every version, calling it must be unnecessary for rejection.
+            with patch.object(Path, "is_junction", create=True,
+                              side_effect=AssertionError("Path.is_junction must not be used")):
                 with self.assertRaisesRegex(BridgeError, "Symlink/junction"):
-                    FileSystemStore(self.root)
+                    FileSystemStore(project)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "Synthetic target must remain intact")
+            # A missing target must not make the junction itself appear safe.
+            sentinel.unlink()
+            target.rmdir()
+            with self.assertRaisesRegex(BridgeError, "Symlink/junction"):
+                FileSystemStore(project)
+        finally:
+            # Nonrecursive rmdir removes only the junction, never its target.
+            try:
+                junction.rmdir()
+            except FileNotFoundError:
+                pass
+
+    @unittest.skipUnless(os.name == "nt", "Windows reparse metadata")
+    def test_unrelated_windows_reparse_tag_is_accepted(self):
+        metadata = SimpleNamespace(st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                                   st_reparse_tag=stat.IO_REPARSE_TAG_APPEXECLINK)
+        with patch.object(Path, "is_symlink", return_value=False), \
+                patch("agent_bridge.storage.filesystem.os.lstat", return_value=metadata):
+            _safe(self.root)
 
     def test_pending_write_is_not_visible(self):
         (self.root / ".agentbridge" / "messages" / ".pending-crashed-write").write_text("{unfinished", encoding="utf-8")
