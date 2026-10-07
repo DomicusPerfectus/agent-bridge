@@ -130,7 +130,10 @@ class TwoPassSelector:
 
         if isinstance(ranked, (str, bytes)) or not isinstance(ranked, Sequence):
             return self._abstain("pass1_invalid", used=True)
-        ranked_values = tuple(ranked)
+        try:
+            ranked_values = tuple(ranked)
+        except Exception:
+            return self._abstain("pass1_invalid", used=True)
         if not ranked_values or len(ranked_values) > effective_top_k:
             return self._abstain("pass1_invalid", used=True)
         if any(not isinstance(item, str) for item in ranked_values):
