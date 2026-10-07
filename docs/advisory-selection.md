@@ -43,9 +43,9 @@ abstention.
 
 Pass-1 elements are type-checked before membership or uniqueness checks. The
 selector reads at most the shortlist bound plus one overflow element, and rejects
-errors raised while iterating or validating external results. String subclasses
-are normalized to built-in strings before allowlist checks, so comparison/hash
-hooks cannot inject a candidate or escape validation. Invalid pass-1
+errors raised while inspecting, iterating or validating external results. Only
+plain built-in strings are accepted; subclasses are rejected before allowlist
+checks, so comparison/hash hooks cannot inject a candidate or escape validation. Invalid pass-1
 results never reach verification. Invalid pass-2 results also fail closed.
 
 Advisor implementations are caller-supplied Python code, not sandboxed plugins.

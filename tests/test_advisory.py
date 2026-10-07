@@ -6,6 +6,22 @@ from tempfile import TemporaryDirectory
 from agent_bridge import Bridge, TwoPassSelector
 
 
+class ExplodingSequence(list):
+    def __iter__(self):
+        raise RuntimeError("offline sequence materialization failure")
+
+
+class UnhashableString(str):
+    __hash__ = None
+
+
+class ExplodingEqualString(str):
+    __hash__ = str.__hash__
+
+    def __eq__(self, other):
+        raise RuntimeError("offline string equality failure")
+
+
 class FakeAdvisor:
     def __init__(self, ranked=None, selected=None, *, rank_error=False, verify_error=False):
         self.ranked = ranked
@@ -163,6 +179,82 @@ class TwoPassSelectionTests(unittest.TestCase):
         self.assertEqual(result.reason, "pass1_invalid")
         self.assertEqual(advisor.verify_calls, 0)
 
+    def test_unhashable_pass1_output_fails_closed_before_dedup(self):
+        malformed_values = (
+            {"candidate": "codex"},
+            ["codex"],
+        )
+        for malformed in malformed_values:
+            with self.subTest(malformed=malformed):
+                advisor = FakeAdvisor(["codex", malformed], "codex")
+                result = TwoPassSelector(advisor).select(
+                    task_category="code_change",
+                    candidates=["codex", "hermes"],
+                )
+                self.assertIsNone(result.selected)
+                self.assertTrue(result.abstained)
+                self.assertEqual(result.reason, "pass1_invalid")
+                self.assertEqual(advisor.rank_calls, 1)
+                self.assertEqual(advisor.verify_calls, 0)
+
+    def test_pass1_materialization_failure_fails_closed(self):
+        advisor = FakeAdvisor(ExplodingSequence(["codex", "hermes"]), "codex")
+        result = TwoPassSelector(advisor).select(
+            task_category="code_change",
+            candidates=["codex", "hermes"],
+        )
+        self.assertIsNone(result.selected)
+        self.assertTrue(result.abstained)
+        self.assertEqual(result.reason, "pass1_invalid")
+        self.assertEqual(advisor.rank_calls, 1)
+        self.assertEqual(advisor.verify_calls, 0)
+
+    def test_pass1_rejects_string_subclasses_before_hash_or_equality(self):
+        malformed_values = (
+            UnhashableString("codex"),
+            ExplodingEqualString("codex"),
+        )
+        for malformed in malformed_values:
+            with self.subTest(type=type(malformed).__name__):
+                advisor = FakeAdvisor([malformed, "hermes"], "hermes")
+                result = TwoPassSelector(advisor).select(
+                    task_category="code_change",
+                    candidates=["codex", "hermes"],
+                )
+                self.assertIsNone(result.selected)
+                self.assertTrue(result.abstained)
+                self.assertEqual(result.reason, "pass1_invalid")
+                self.assertEqual(advisor.rank_calls, 1)
+                self.assertEqual(advisor.verify_calls, 0)
+
+    def test_pass2_rejects_string_subclass_without_custom_equality(self):
+        advisor = FakeAdvisor(
+            ["codex", "hermes"],
+            ExplodingEqualString("codex"),
+        )
+        result = TwoPassSelector(advisor).select(
+            task_category="code_change",
+            candidates=["codex", "hermes"],
+        )
+        self.assertIsNone(result.selected)
+        self.assertTrue(result.abstained)
+        self.assertEqual(result.reason, "pass2_invalid")
+        self.assertEqual(advisor.rank_calls, 1)
+        self.assertEqual(advisor.verify_calls, 1)
+
+    def test_local_inputs_reject_string_subclasses_cleanly(self):
+        selector = TwoPassSelector(FakeAdvisor(["codex", "hermes"], "codex"))
+        with self.assertRaises(ValueError):
+            selector.select(
+                task_category=UnhashableString("code_change"),
+                candidates=["codex", "hermes"],
+            )
+        with self.assertRaises(ValueError):
+            selector.select(
+                task_category="code_change",
+                candidates=[UnhashableString("codex"), "hermes"],
+            )
+
     def test_invalid_pass2_selection_abstains(self):
         advisor = FakeAdvisor(["codex", "hermes"], "human:reviewer")
         result = TwoPassSelector(advisor).select(
@@ -257,18 +349,8 @@ class TwoPassSelectionTests(unittest.TestCase):
         self.assert_invalid_pass1(ranked)
         self.assertEqual(ranked.reads, 3)
 
-    def test_external_string_hooks_are_not_called(self):
-        advisor = FakeAdvisor(
-            [BrokenHash("codex"), BrokenEquality("hermes")],
-            BrokenEquality("codex"),
-        )
-        result = TwoPassSelector(advisor).select(
-            task_category="analysis", candidates=["codex", "hermes"]
-        )
-        self.assertFalse(result.abstained)
-        self.assertEqual(result.selected, "codex")
-        self.assertIs(type(result.selected), str)
-        self.assertTrue(all(type(item) is str for item in result.shortlist))
+    def test_external_string_hooks_rejected_without_invocation(self):
+        self.assert_invalid_pass1([BrokenHash("codex"), BrokenEquality("hermes")])
 
     def test_pass1_string_subclass_cannot_spoof_allowlist(self):
         self.assert_invalid_pass1([SpoofedEquality("not-allowed"), "codex"])
@@ -282,16 +364,20 @@ class TwoPassSelectionTests(unittest.TestCase):
         self.assertEqual(result.reason, "pass2_invalid")
         self.assertEqual(advisor.verify_calls, 1)
 
-    def test_local_string_subclasses_are_normalized_before_advice(self):
+    def test_local_string_subclasses_rejected_before_advice(self):
         advisor = FakeAdvisor(["codex", "hermes"], "codex")
-        result = TwoPassSelector(advisor).select(
-            task_category=BrokenHash("analysis"),
-            candidates=[BrokenHash("codex"), BrokenEquality("hermes")],
-        )
-        self.assertFalse(result.abstained)
-        category, candidates, _ = advisor.rank_inputs[0]
-        self.assertIs(type(category), str)
-        self.assertTrue(all(type(item) is str for item in candidates))
+        selector = TwoPassSelector(advisor)
+        with self.assertRaises(ValueError):
+            selector.select(
+                task_category=BrokenHash("analysis"), candidates=["codex", "hermes"]
+            )
+        with self.assertRaises(ValueError):
+            selector.select(
+                task_category="analysis",
+                candidates=[BrokenHash("codex"), BrokenEquality("hermes")],
+            )
+        self.assertEqual(advisor.rank_calls, 0)
+        self.assertEqual(advisor.verify_calls, 0)
 
     def test_pass2_malformed_values_and_equality_fail_closed(self):
         for selected in ({}, [], 42, SpoofedEquality("not-allowed")):
