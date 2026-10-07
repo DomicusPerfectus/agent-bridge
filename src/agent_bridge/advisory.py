@@ -65,17 +65,21 @@ class TwoPassSelector:
 
     @staticmethod
     def _category(value: str) -> str:
-        if not isinstance(value, str) or not _CATEGORY.fullmatch(value):
+        if type(value) is not str or not _CATEGORY.fullmatch(value):
             raise ValueError("task_category must be a short machine-readable code")
         return value
 
     def _candidates(self, values: Sequence[str]) -> tuple[str, ...]:
-        if isinstance(values, (str, bytes)):
+        if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
             raise ValueError("candidates must be a sequence of identifiers")
+        try:
+            materialized = tuple(values)
+        except Exception as exc:
+            raise ValueError("candidates must be a sequence of identifiers") from exc
         unique: list[str] = []
         seen: set[str] = set()
-        for value in values:
-            if not isinstance(value, str) or not _CANDIDATE.fullmatch(value):
+        for value in materialized:
+            if type(value) is not str or not _CANDIDATE.fullmatch(value):
                 raise ValueError("invalid candidate identifier")
             if value not in seen:
                 seen.add(value)
@@ -136,7 +140,7 @@ class TwoPassSelector:
             return self._abstain("pass1_invalid", used=True)
         if not ranked_values or len(ranked_values) > effective_top_k:
             return self._abstain("pass1_invalid", used=True)
-        if any(not isinstance(item, str) for item in ranked_values):
+        if any(type(item) is not str for item in ranked_values):
             return self._abstain("pass1_invalid", used=True)
         if (
             len(set(ranked_values)) != len(ranked_values)
@@ -155,7 +159,7 @@ class TwoPassSelector:
 
         if selected is None:
             return self._abstain("advisor_abstained", shortlist, used=True)
-        if not isinstance(selected, str) or selected not in shortlist:
+        if type(selected) is not str or selected not in shortlist:
             return self._abstain("pass2_invalid", shortlist, used=True)
         return SelectionResult(
             selected=selected,
