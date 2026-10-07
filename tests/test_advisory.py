@@ -5,6 +5,11 @@ from tempfile import TemporaryDirectory
 from agent_bridge import Bridge, TwoPassSelector
 
 
+class ExplodingSequence(list):
+    def __iter__(self):
+        raise RuntimeError("offline sequence materialization failure")
+
+
 class FakeAdvisor:
     def __init__(self, ranked=None, selected=None, *, rank_error=False, verify_error=False):
         self.ranked = ranked
@@ -130,6 +135,18 @@ class TwoPassSelectionTests(unittest.TestCase):
                 self.assertEqual(result.reason, "pass1_invalid")
                 self.assertEqual(advisor.rank_calls, 1)
                 self.assertEqual(advisor.verify_calls, 0)
+
+    def test_pass1_materialization_failure_fails_closed(self):
+        advisor = FakeAdvisor(ExplodingSequence(["codex", "hermes"]), "codex")
+        result = TwoPassSelector(advisor).select(
+            task_category="code_change",
+            candidates=["codex", "hermes"],
+        )
+        self.assertIsNone(result.selected)
+        self.assertTrue(result.abstained)
+        self.assertEqual(result.reason, "pass1_invalid")
+        self.assertEqual(advisor.rank_calls, 1)
+        self.assertEqual(advisor.verify_calls, 0)
 
     def test_invalid_pass2_selection_abstains(self):
         advisor = FakeAdvisor(["codex", "hermes"], "human:reviewer")
