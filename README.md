@@ -172,6 +172,21 @@ chat histories. Hermes/MindOS can implement `AgentAdapter`, choose their own
 agent identifiers, and carry vendor metadata in `extensions`. There is no special
 provider dependency or hardcoded list of allowed agents.
 
+
+## Optional two-pass advisory selection
+
+Agent Bridge includes a provider-neutral `TwoPassSelector` for runners that need
+advice among several already-permitted destinations or capabilities. Pass 1 ranks
+the bounded allowlist; pass 2 verifies the shortlist and may abstain. The selector
+never executes, dispatches, retries or persists advice, and it accepts only a
+machine-readable task category rather than raw task text.
+
+A private runner can implement the `SelectionAdvisor` protocol with BuildHub
+Decision Service / Jev while keeping provider credentials and audit data outside
+the bridge log. Existing task, handoff and human-approval rules remain
+authoritative. See [two-pass advisory selection](docs/advisory-selection.md) and
+the offline [advisory demo](examples/advisory_demo.py).
+
 ## Data and project layout
 
 `agentbridge init` creates `.agentbridge/config.json` and an ordered immutable
