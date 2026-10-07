@@ -133,9 +133,11 @@ class TwoPassSelector:
         ranked_values = tuple(ranked)
         if not ranked_values or len(ranked_values) > effective_top_k:
             return self._abstain("pass1_invalid", used=True)
+        if any(not isinstance(item, str) for item in ranked_values):
+            return self._abstain("pass1_invalid", used=True)
         if (
             len(set(ranked_values)) != len(ranked_values)
-            or any(not isinstance(item, str) or item not in allowed for item in ranked_values)
+            or any(item not in allowed for item in ranked_values)
         ):
             return self._abstain("pass1_invalid", used=True)
 
