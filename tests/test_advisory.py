@@ -1,6 +1,8 @@
 import unittest
 
-from agent_bridge import TwoPassSelector
+from tempfile import TemporaryDirectory
+
+from agent_bridge import Bridge, TwoPassSelector
 
 
 class FakeAdvisor:
@@ -164,6 +166,18 @@ class TwoPassSelectionTests(unittest.TestCase):
                 task_category="analysis",
                 candidates=["codex", "hermes", "human:reviewer"],
             )
+
+    def test_selection_does_not_mutate_bridge_state(self):
+        with TemporaryDirectory() as root:
+            bridge = Bridge.initialize(root, "Advisory test")
+            before = bridge.status()
+            advisor = FakeAdvisor(["codex", "hermes"], "codex")
+            result = TwoPassSelector(advisor).select(
+                task_category="code_change",
+                candidates=["codex", "hermes"],
+            )
+            self.assertEqual(result.selected, "codex")
+            self.assertEqual(bridge.status(), before)
 
 
 if __name__ == "__main__":
