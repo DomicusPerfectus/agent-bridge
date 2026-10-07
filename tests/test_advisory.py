@@ -1,4 +1,5 @@
 import unittest
+from collections.abc import Sequence
 
 from tempfile import TemporaryDirectory
 
@@ -29,6 +30,55 @@ class FakeAdvisor:
         if self.verify_error:
             raise RuntimeError("offline verify failure")
         return self.selected
+
+
+class BrokenTypeInspection:
+    @property
+    def __class__(self):
+        raise RuntimeError("malformed type inspection")
+
+
+class BrokenSequence(Sequence):
+    def __len__(self):
+        return 2
+
+    def __getitem__(self, index):
+        raise RuntimeError("malformed sequence")
+
+    def __iter__(self):
+        raise RuntimeError("malformed iteration")
+
+
+class OversizedSequence(Sequence):
+    def __init__(self):
+        self.reads = 0
+
+    def __len__(self):
+        return 10**9
+
+    def __getitem__(self, index):
+        self.reads += 1
+        return "codex"
+
+
+class BrokenHash(str):
+    def __hash__(self):
+        raise TypeError("malformed hash")
+
+
+class BrokenEquality(str):
+    def __eq__(self, other):
+        raise RuntimeError("malformed equality")
+
+
+class SpoofedEquality(str):
+    __hash__ = str.__hash__
+
+    def __eq__(self, other):
+        return True
+
+    def __str__(self):
+        return "codex"
 
 
 class TwoPassSelectionTests(unittest.TestCase):
@@ -166,6 +216,96 @@ class TwoPassSelectionTests(unittest.TestCase):
                 task_category="analysis",
                 candidates=["codex", "hermes", "human:reviewer"],
             )
+
+    def assert_invalid_pass1(self, ranked):
+        advisor = FakeAdvisor(ranked, "codex")
+        result = TwoPassSelector(advisor).select(
+            task_category="code_change",
+            candidates=["codex", "hermes"],
+        )
+        self.assertTrue(result.abstained)
+        self.assertIsNone(result.selected)
+        self.assertEqual(result.shortlist, ())
+        self.assertEqual(result.reason, "pass1_invalid")
+        self.assertEqual(advisor.rank_calls, 1)
+        self.assertEqual(advisor.verify_calls, 0)
+
+    def test_unhashable_dict_pass1_fails_closed(self):
+        self.assert_invalid_pass1([{"bad": "object"}, "codex"])
+
+    def test_unhashable_list_pass1_fails_closed(self):
+        self.assert_invalid_pass1([["bad", "array"], "codex"])
+
+    def test_other_malformed_pass1_values_fail_closed(self):
+        for ranked in ([42, "codex"], [None, "codex"], [{}, []]):
+            with self.subTest(ranked=ranked):
+                self.assert_invalid_pass1(ranked)
+
+    def test_invalid_pass1_shape_and_bounds_fail_closed(self):
+        for ranked in ("codex", b"codex", None, [], ["codex", "hermes", "codex"]):
+            with self.subTest(ranked=ranked):
+                self.assert_invalid_pass1(ranked)
+
+    def test_broken_external_type_inspection_fails_closed(self):
+        self.assert_invalid_pass1(BrokenTypeInspection())
+
+    def test_broken_external_sequence_fails_closed(self):
+        self.assert_invalid_pass1(BrokenSequence())
+
+    def test_oversized_external_sequence_reads_only_overflow_bound(self):
+        ranked = OversizedSequence()
+        self.assert_invalid_pass1(ranked)
+        self.assertEqual(ranked.reads, 3)
+
+    def test_external_string_hooks_are_not_called(self):
+        advisor = FakeAdvisor(
+            [BrokenHash("codex"), BrokenEquality("hermes")],
+            BrokenEquality("codex"),
+        )
+        result = TwoPassSelector(advisor).select(
+            task_category="analysis", candidates=["codex", "hermes"]
+        )
+        self.assertFalse(result.abstained)
+        self.assertEqual(result.selected, "codex")
+        self.assertIs(type(result.selected), str)
+        self.assertTrue(all(type(item) is str for item in result.shortlist))
+
+    def test_pass1_string_subclass_cannot_spoof_allowlist(self):
+        self.assert_invalid_pass1([SpoofedEquality("not-allowed"), "codex"])
+
+    def test_pass2_string_subclass_cannot_spoof_shortlist(self):
+        advisor = FakeAdvisor(["codex"], SpoofedEquality("hermes"))
+        result = TwoPassSelector(advisor).select(
+            task_category="analysis", candidates=["codex", "hermes"], top_k=1
+        )
+        self.assertTrue(result.abstained)
+        self.assertEqual(result.reason, "pass2_invalid")
+        self.assertEqual(advisor.verify_calls, 1)
+
+    def test_local_string_subclasses_are_normalized_before_advice(self):
+        advisor = FakeAdvisor(["codex", "hermes"], "codex")
+        result = TwoPassSelector(advisor).select(
+            task_category=BrokenHash("analysis"),
+            candidates=[BrokenHash("codex"), BrokenEquality("hermes")],
+        )
+        self.assertFalse(result.abstained)
+        category, candidates, _ = advisor.rank_inputs[0]
+        self.assertIs(type(category), str)
+        self.assertTrue(all(type(item) is str for item in candidates))
+
+    def test_pass2_malformed_values_and_equality_fail_closed(self):
+        for selected in ({}, [], 42, SpoofedEquality("not-allowed")):
+            with self.subTest(selected=selected):
+                advisor = FakeAdvisor(["codex", "hermes"], selected)
+                result = TwoPassSelector(advisor).select(
+                    task_category="analysis",
+                    candidates=["codex", "hermes"],
+                )
+                self.assertTrue(result.abstained)
+                self.assertEqual(result.reason, "pass2_invalid")
+                self.assertEqual(result.shortlist, ("codex", "hermes"))
+                self.assertEqual(advisor.rank_calls, 1)
+                self.assertEqual(advisor.verify_calls, 1)
 
     def test_selection_does_not_mutate_bridge_state(self):
         with TemporaryDirectory() as root:

@@ -5,6 +5,7 @@ advisor implementation and decides whether to use the returned advice.
 """
 
 from dataclasses import dataclass
+from itertools import islice
 import re
 from typing import Protocol, Sequence
 
@@ -67,7 +68,7 @@ class TwoPassSelector:
     def _category(value: str) -> str:
         if not isinstance(value, str) or not _CATEGORY.fullmatch(value):
             raise ValueError("task_category must be a short machine-readable code")
-        return value
+        return str.__str__(value)
 
     def _candidates(self, values: Sequence[str]) -> tuple[str, ...]:
         if isinstance(values, (str, bytes)):
@@ -77,6 +78,7 @@ class TwoPassSelector:
         for value in values:
             if not isinstance(value, str) or not _CANDIDATE.fullmatch(value):
                 raise ValueError("invalid candidate identifier")
+            value = str.__str__(value)
             if value not in seen:
                 seen.add(value)
                 unique.append(value)
@@ -128,15 +130,23 @@ class TwoPassSelector:
         except Exception:
             return self._abstain("pass1_unavailable", used=True)
 
-        if isinstance(ranked, (str, bytes)) or not isinstance(ranked, Sequence):
-            return self._abstain("pass1_invalid", used=True)
-        ranked_values = tuple(ranked)
-        if not ranked_values or len(ranked_values) > effective_top_k:
-            return self._abstain("pass1_invalid", used=True)
-        if (
-            len(set(ranked_values)) != len(ranked_values)
-            or any(not isinstance(item, str) or item not in allowed for item in ranked_values)
-        ):
+        try:
+            if isinstance(ranked, (str, bytes)) or not isinstance(ranked, Sequence):
+                return self._abstain("pass1_invalid", used=True)
+            # Read at most one overflow element from an untrusted Sequence.
+            ranked_values = tuple(islice(ranked, effective_top_k + 1))
+            if not ranked_values or len(ranked_values) > effective_top_k:
+                return self._abstain("pass1_invalid", used=True)
+            # Prove types before membership, hashing, or deduplication.
+            if any(not isinstance(item, str) for item in ranked_values):
+                return self._abstain("pass1_invalid", used=True)
+            # Strip subclass comparison/hash hooks before allowlist checks.
+            ranked_values = tuple(str.__str__(item) for item in ranked_values)
+            if any(item not in allowed for item in ranked_values):
+                return self._abstain("pass1_invalid", used=True)
+            if len(set(ranked_values)) != len(ranked_values):
+                return self._abstain("pass1_invalid", used=True)
+        except Exception:
             return self._abstain("pass1_invalid", used=True)
 
         shortlist = ranked_values
@@ -150,7 +160,13 @@ class TwoPassSelector:
 
         if selected is None:
             return self._abstain("advisor_abstained", shortlist, used=True)
-        if not isinstance(selected, str) or selected not in shortlist:
+        try:
+            if not isinstance(selected, str):
+                return self._abstain("pass2_invalid", shortlist, used=True)
+            selected = str.__str__(selected)
+            if selected not in shortlist:
+                return self._abstain("pass2_invalid", shortlist, used=True)
+        except Exception:
             return self._abstain("pass2_invalid", shortlist, used=True)
         return SelectionResult(
             selected=selected,
