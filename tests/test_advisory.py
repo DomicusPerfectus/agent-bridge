@@ -113,6 +113,24 @@ class TwoPassSelectionTests(unittest.TestCase):
         self.assertEqual(result.reason, "pass1_invalid")
         self.assertEqual(advisor.verify_calls, 0)
 
+    def test_unhashable_pass1_output_fails_closed_before_dedup(self):
+        malformed_values = (
+            {"candidate": "codex"},
+            ["codex"],
+        )
+        for malformed in malformed_values:
+            with self.subTest(malformed=malformed):
+                advisor = FakeAdvisor(["codex", malformed], "codex")
+                result = TwoPassSelector(advisor).select(
+                    task_category="code_change",
+                    candidates=["codex", "hermes"],
+                )
+                self.assertIsNone(result.selected)
+                self.assertTrue(result.abstained)
+                self.assertEqual(result.reason, "pass1_invalid")
+                self.assertEqual(advisor.rank_calls, 1)
+                self.assertEqual(advisor.verify_calls, 0)
+
     def test_invalid_pass2_selection_abstains(self):
         advisor = FakeAdvisor(["codex", "hermes"], "human:reviewer")
         result = TwoPassSelector(advisor).select(
