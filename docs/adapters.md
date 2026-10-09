@@ -166,6 +166,11 @@ connections are future integration work, not automatic behavior of this library.
 
 ## Hermes, MindOS and private organizations
 
+The owner-defined canonical Hermes destination now has an opt-in local runner
+and codec. See [Local Hermes runner](hermes-runner.md) for registration preview,
+explicit invocation, local-only policy proof and the boundary that configured
+Hermes tools remain enabled. The generic examples below do not install workers.
+
 Use generic identifiers such as `chatgpt:planner`, `codex:worker`,
 `hermes:orchestrator` and `mindos:planner`. These are sanitized examples, not
 an internal organization configuration. Keep private deployment mappings and
