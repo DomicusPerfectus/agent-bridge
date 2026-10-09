@@ -1,18 +1,51 @@
 """A small append-only log with one lock and atomic file publication."""
 
-from contextlib import contextmanager
+import ctypes
 import os
-from pathlib import Path
 import re
 import stat
 import tempfile
 import time
+from contextlib import contextmanager
+from pathlib import Path
 from uuid import uuid4
 
-from ..protocol import BridgeError, Message, PROTOCOL_VERSION, json_dumps, json_loads
+from ..protocol import PROTOCOL_VERSION, BridgeError, Message, json_dumps, json_loads
 from ..protocol.message import MAX_MESSAGE_BYTES, identifier, nonempty, timestamp, utc_now
 
 EVENT_FILE = re.compile(r"^(\d{12})_([0-9a-f-]{36})\.json$")
+
+
+def _publish_windows(temporary: str, path: Path) -> None:
+    # MoveFileExW's WRITE_THROUGH waits for disk publication. Do not allow a
+    # cross-volume copy/delete fallback: the temporary file shares the parent.
+    # https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-movefileexw
+    from ctypes import wintypes
+
+    move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
+    move.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    move.restype = wintypes.BOOL
+    if not move(temporary, str(path), 0x1 | 0x8):  # REPLACE_EXISTING | WRITE_THROUGH
+        raise OSError(ctypes.get_last_error(), "durable publication failed")
+
+
+def _publish_posix(temporary: str, path: Path) -> None:
+    # Anchor the rename and barrier to the same non-link directory descriptor.
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.replace(Path(temporary).name, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _durable_publish(temporary: str, path: Path) -> None:
+    _safe(path.parent)
+    _safe(path)
+    if os.name == "nt":
+        _publish_windows(temporary, path)
+    else:
+        _publish_posix(temporary, path)
 
 
 def _is_link_or_junction(path: Path) -> bool:
@@ -26,9 +59,11 @@ def _is_link_or_junction(path: Path) -> bool:
         return False  # Future storage paths are valid during initialization.
     # These Windows metadata fields/constants exist since Python 3.8. Reject
     # link tags specifically, not unrelated reparse types such as cloud files.
-    return (metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT != 0
-            and metadata.st_reparse_tag in (stat.IO_REPARSE_TAG_MOUNT_POINT,
-                                           stat.IO_REPARSE_TAG_SYMLINK))
+    return (
+        metadata.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT != 0
+        and metadata.st_reparse_tag
+        in (stat.IO_REPARSE_TAG_MOUNT_POINT, stat.IO_REPARSE_TAG_SYMLINK)
+    )
 
 
 def _safe(path: Path) -> None:
@@ -51,16 +86,22 @@ def _atomic_write(path: Path, data: dict) -> None:
     text = json_dumps(data)
     if len(text.encode("utf-8")) > MAX_MESSAGE_BYTES:
         raise BridgeError("File exceeds the 1 MiB limit")
-    fd, temporary = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
+    temporary = None
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-            stream.write(text)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+        fd, temporary = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+                stream.write(text)
+                stream.flush()
+                os.fsync(stream.fileno())
+            _durable_publish(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    except OSError:
+        # Publication may already be visible when its barrier fails. Leave that
+        # claim for investigation; never report success or retry the invocation.
+        raise BridgeError("bridge_storage_durability_failed") from None
 
 
 class FileSystemStore:
@@ -81,12 +122,15 @@ class FileSystemStore:
         _safe(self.data / ".lock")
 
     @classmethod
-    def initialize(cls, root: Path | str, name: str, project_id: str | None = None) -> "FileSystemStore":
+    def initialize(
+        cls, root: Path | str, name: str, project_id: str | None = None
+    ) -> "FileSystemStore":
         nonempty(name, "project_name")
         if project_id is not None:
             identifier(project_id, "project_id")
         store = cls(root)
         from .git_exclude import protect_runtime
+
         protect_runtime(store.root)
         store.data.mkdir(exist_ok=True, mode=0o700)
         with store.transaction():
@@ -101,11 +145,17 @@ class FileSystemStore:
                 if store.log.exists() and any(store.log.iterdir()):
                     raise BridgeError("Refusing to initialize over an orphaned message log")
                 store.log.mkdir(exist_ok=True, mode=0o700)
-                _atomic_write(path, {
-                    "protocol_version": PROTOCOL_VERSION,
-                    "project_id": project_id or str(uuid4()), "project_name": name,
-                    "created_at": utc_now(), "storage": "filesystem", "transport": "local",
-                })
+                _atomic_write(
+                    path,
+                    {
+                        "protocol_version": PROTOCOL_VERSION,
+                        "project_id": project_id or str(uuid4()),
+                        "project_name": name,
+                        "created_at": utc_now(),
+                        "storage": "filesystem",
+                        "transport": "local",
+                    },
+                )
         return store
 
     @contextmanager
@@ -123,7 +173,9 @@ class FileSystemStore:
                 break
             except FileExistsError as exc:
                 if time.monotonic() >= deadline:
-                    raise BridgeError("Bridge is locked; wait for the writer. For a stale lock, see SECURITY.md") from exc
+                    raise BridgeError(
+                        "Bridge is locked; wait for the writer. For a stale lock, see SECURITY.md"
+                    ) from exc
                 time.sleep(0.05)
         try:
             with os.fdopen(fd, "w", encoding="ascii") as stream:
@@ -145,7 +197,14 @@ class FileSystemStore:
         if not path.is_file():
             raise BridgeError("Bridge is not initialized; run agentbridge init")
         data = read_json_file(path)
-        expected = {"protocol_version", "project_id", "project_name", "created_at", "storage", "transport"}
+        expected = {
+            "protocol_version",
+            "project_id",
+            "project_name",
+            "created_at",
+            "storage",
+            "transport",
+        }
         if not isinstance(data, dict) or set(data) != expected:
             raise BridgeError("Invalid bridge configuration fields")
         identifier(data["project_id"], "project_id")
